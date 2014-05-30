@@ -370,7 +370,7 @@ Send sample data to `reactor-ip` source.
 
 [source,text]
 ----
-# cat date-counters-default-10000.txt | nc node2 3000
+# cat date-counters-default-10000.txt | nc localhost 3000
 ----
 
 List files and see how data is partitioned.
