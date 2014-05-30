@@ -1,20 +1,24 @@
-These samples demonstrates a various functionality of using `hdfs` sink and its partitioning functionality. We have 9 different test scenarious with source data sample files.
+= HDFS Sink Partitioning
+
+These samples demonstrates a various functionality of using `hdfs` sink and its partitioning functionality. We have 9 different test scenarious with source data sample files. See https://github.com/spring-projects/spring-xd/wiki/Sinks#hadoop-hdfs[hdfs sink documentation].
 
 .Notes for tests
 - Output from ‘hadoop fs ls’ has been manually modified to show only size, time and path.
-- Tests using ctrl-1, ctrl-2 characters doesn’t show up in ‘hadoop fs cat’ when pasted to this doc. Visible in command line though.
-- Finding reactor-ip source tcp address. Use “runtime modules” and “runtime container” to match Container Id and Host where source is running. Default port is 3000. You can send any data to it by piping it via netcat, i.e. “cat hash-100000.txt | nc node3 3000”.
-- In these instructions tests are run with in distributed mode with three `hdfs` sinks. However it's perfectly all right to run these using a singlenode installation. If you want to have only one `hdfs` sink, leave out the `properties` option when using `stream deploy` command.
+- Tests using ctrl-1, ctrl-2 special characters doesn’t show up in ‘hadoop fs cat’ when pasted to this doc. Visible in command line though.
+- Finding reactor-ip source tcp address. Use “runtime modules” and “runtime container” to match Container Id and Host where source is running. Default port is 3000. You can send any data to it by piping it via netcat, i.e. “cat hash-100000.txt | nc node3 3000”. If running singlenode instance, address would always be localhost.
+- In these instructions tests are run with in distributed mode with three `hdfs` sinks. However it's perfectly all right to run these using a singlenode installation. If you want to have only one `hdfs` sink, leave out the `properties` option when using `stream deploy` command. With singlenode you just have a slightly different output when listing files.
 
 == Test 1 - Simple time|hdfs with partitionPath
 
-With this test see that new partitioned files are opened when we get past the next minute boundary.
+With this test you can see that new partitioned files are opened when we get past the next minute boundary. Pattern used in `dateFormat` is resolved with current timestamp.
 
 [source,text]
 ----
 xd:>stream create --name test1 --definition "time|hdfs --idleTimeout=10000 --partitionPath=dateFormat('yyyy/MM/dd/HH/mm')"
 xd:>stream deploy --name test1 --properties "module.hdfs.count=3"
 ----
+
+Keep the stream running and list created files. Files having a suffix `.tmp` are currently open for write operation.
 
 [source,text]
 ----
@@ -55,13 +59,16 @@ xd:>hadoop fs ls --recursive true --dir /xd/test1
 
 
 == Test 2 - Simple time|hdfs without partitionPath
-With this test see that new partitioned files are opened without using partitionPath. If you setup fixedDelay and idleTimeout so that writers will get timeouts, you’ll see how new rolling part is opened even if it’s a distributed writer.
+
+With this test see that new partitioned files are opened without using partitionPath. If you setup fixedDelay and idleTimeout so that writers will get timeouts, you’ll see how new rolling part is opened even if it’s a distributed writer. If using a singlenode you'd see only one file open at any time.
 
 [source,text]
 ----
 xd:>stream create --name test2 --definition "time --fixedDelay=5|hdfs --idleTimeout=10000"
 xd:>stream deploy --name test2 --properties "module.hdfs.count=3"
 ----
+
+Keep the stream running and list created files.
 
 [source,text]
 ----
@@ -74,6 +81,7 @@ xd:>hadoop fs ls --recursive true --dir /xd/test2
 ----
 
 == Test 3 - Simple time|hdfs without partitionPath with uuid
+
 Same as test2 but we use uuid in file names. Uuid will add a unique file name per writer so rolling part is incremented within a writer itself, not globally.
 
 [source,text]
@@ -81,6 +89,8 @@ Same as test2 but we use uuid in file names. Uuid will add a unique file name pe
 xd:>stream create --name test3 --definition "time --fixedDelay=5|hdfs --idleTimeout=10000 --fileUuid=true"
 xd:>stream deploy --name test3 --properties "module.hdfs.count=3"
 ----
+
+Keep the stream running and list created files.
 
 [source,text]
 ----
@@ -92,7 +102,8 @@ xd:>hadoop fs ls --recursive true --dir /xd/test3
 ----
 
 == Test 4 - Simple time|transform|hdfs partitioning by content
-In this test we use time to get dummy tick, use transform to create a random content and finally use path() and dateFormat() to construct a path out from a payload. This is the format for Rodrigo’s dog food project where data is delimited with ctrl-1 and ctrl-2 and first part is the app id to be used for partitioning.
+
+In this test we use time to get dummy tick, use transform to create a random content and finally use path() and dateFormat() to construct a path out from a payload. This is a sample where data is delimited with ctrl-1 and ctrl-2 special characters and first part is the app id to be used for partitioning.
 
 [source,text]
 ----
@@ -149,6 +160,7 @@ APP2foobar
 ----
 
 == Test 5 - Simple reactor-ip|hdfs partitioning by dateFormat and list
+
 We use the ctrl delimited data pre-written in app1to10-*.txt files. Feed this data into hdfs sinks via reactor-ip source. See notes how to find reactor tcp port and how to feed data into it.
 We simply use dateFormat and list partitioning to collect entries from APP1-APP5 to 1TO5 and APP6-APP10 to 6TO10. We enable fileUuid and use idleTimeout to close files at some point while stream is still deployed.
 
@@ -162,12 +174,14 @@ xd:>stream create --name test5 --definition "reactor-ip | hdfs --idleTimeout=300
 xd:>stream deploy --name test5 --properties "module.hdfs.count=3,module.reactor-ip.count=1"
 ----
 
+Send sample data to `reactor-ip` source.
+
 [source,text]
 ----
-# cat app1to10-1000000.txt | nc node2 3000
+# cat app1to10-1000000.txt | nc localhost 3000
 ----
 
-When all data is ingested via rabbit into sinks, we should eventually see files to be closed and data partitioned into 6 different files. You could have more files if stream chokes and timeout occurs with a writer.
+When all data is ingested into sinks, we should eventually see files to be closed and data partitioned into 6 different files. You could have more files if stream chokes and timeout occurs with a writer.
 
 [source,text]
 ----
@@ -207,21 +221,32 @@ APP2foobar
 
 
 == Test 6 - Simple reactor-ip|hdfs partitioning by dateFormat and range
+
 In this we take a simple counter data from 1 to 7500 prefixed with ‘XXX’ and partition by an Integer range:
+[source,text]
+----
 XXX1
 …
 XXX1234
 …
 XXX7500
-The range() partition function takes a key as first argument and list as a second argument. Behind the scenes this is using jvm’s binarySearch which works on an Object level so we can pass in anything. Thought meaningful range match only works if passed in Object are of same type like Integers. Range is defined by a binarySearch itself so mostly it is to match against an upper bound except the last range in a list. Having a list of {1000,3000,5000} means that everything above 3000 will be matched with 5000. If that is an issue then simply adding Integer.MAX_VALUE as last range would overflow everything above 5000 into a new partition.
+----
 
-Path part with range() partitioning is suffixed with “_range”, these suffixes were chosen to mimic kitesdk.
+The range() partition function takes a key as first argument and list as a second argument. Behind the scenes this is using jvm’s binarySearch which works on an Object level so we can pass in anything. Thought meaningful range match only works if passed in Object are of same type like Integers. Range is defined by a binarySearch itself so mostly it is to match against an upper bound except the last range in a list. Having a list of `{1000,3000,5000}` means that everything above 3000 will be matched with 5000. If that is an issue then simply adding Integer.MAX_VALUE as last range would overflow everything above 5000 into a new partition.
+
+Path part with range() partitioning is suffixed with “_range”.
 
 [source,text]
 ----
 xd:>stream create --name test6 --definition "reactor-ip | hdfs --idleTimeout=30000 --fileUuid=true --partitionPath=path(dateFormat('yyyy/MM/dd'),range(T(Integer).parseInt(payload.substring(3)),{1000,3000,5000}))"
 xd:>stream deploy --name test6 --properties "module.hdfs.count=3,module.reactor-ip.count=1"
-# cat counters-7500.txt | nc node2 3000
+----
+
+Send sample data to `reactor-ip` source.
+
+[source,text]
+----
+# cat counters-7500.txt | nc localhost 3000
 ----
 
 These 7500 data items would then go into 3 different partitions and every writer would naturally have its own partition files totalling of 9 files with 3 containers.
@@ -246,8 +271,8 @@ xd:>hadoop fs ls --recursive true --dir /xd/test6
 13568 2014-05-22 21:51 /xd/test6/2014/05/22/5000_range/test6-4fc6a25d-d24f-413f-aeb2-0e33efde037a-0.txt
 ----
 
-
 == Test 7 - Simple reactor-ip|hdfs partitioning by dateFormat and hash
+
 In this we take a simple counter data which have two fields separate by comma, first field is an app id(APP1 - APP100) and second field a counter (1 - 10000):
 [source,text]
 ----
@@ -263,8 +288,7 @@ APP33,10000
 
 Focus is to have an even distribution in partition files so that when files are processed we would not have mixed small and large files. We know that there are 10000 items in this file and 100 different app id’s. Let’s just try to partition with Object hashCode and its modulo with 7 buckets.
 
-Hashing is using “Object.hashCode() % buckets” is far from perfect but it’s a good start. We could potentially add proper hashing using SHA or whatever other hashing tricks are out there. Though these security hash function would always impose a penalty per message. Also a good distribution always depends on data and what kind of data that is and an appropriate hashing method for that particular data.
-Path part with range() partitioning is suffixed with “_hash”, these suffixes were chosen to mimic kitesdk.
+Hashing is using “Object.hashCode() % buckets”. Path part with range() partitioning is suffixed with “_hash”.
 
 [source,text]
 ----
@@ -272,9 +296,11 @@ xd:>stream create --name test7 --definition "reactor-ip | hdfs --idleTimeout=300
 xd:>stream deploy --name test7 --properties "module.hdfs.count=3,module.reactor-ip.count=1"
 ----
 
+Send sample data to `reactor-ip` source.
+
 [source,text]
 ----
-# cat hash-10000.txt | nc node2 3000
+# cat hash-10000.txt | nc localhost 3000
 ----
 
 Checking the files sizes on left side shows that if bucket size is chosen wisely, depending on a data, we should get pretty good distribution into 7 buckets throughout 3 writers into total of 21 files. 
@@ -317,7 +343,8 @@ xd:>hadoop fs ls --recursive true --dir /xd/test7
 
 
 == Test 8 - Simple reactor-ip|hdfs partitioning by dateFormat with given field value
-In this we take a simple counter data which have two fields separated by comma, first field is a date(yyyy-MM-dd) and second field is a counter (1 - 10000):
+
+In this we take a simple counter data which have two fields separated by comma, first field is a date `yyyy-MM-dd` and second field is a counter `1 - 10000`:
 [source,text]
 ----
 1970-01-01,1
@@ -339,10 +366,14 @@ xd:>stream create --name test8 --definition "reactor-ip | hdfs --idleTimeout=300
 xd:>stream deploy --name test8 --properties "module.hdfs.count=3,module.reactor-ip.count=1"
 ----
 
+Send sample data to `reactor-ip` source.
+
 [source,text]
 ----
 # cat date-counters-default-10000.txt | nc node2 3000
 ----
+
+List files and see how data is partitioned.
 
 [source,text]
 ----
@@ -376,11 +407,10 @@ xd:>hadoop fs ls --recursive true --dir /xd/test8
  7536 2014-05-23 12:42 /xd/test8/1970/01/06/test8-99de2617-c0c5-4d7e-a873-786d50ffff3a-0.txt
 ----
 
-
-
 == Test 9 - Simple reactor-ip|hdfs partitioning by dateFormat with given field value and custom format
+
 Same as test 8 but first field in a data has a different format.
-In this we take a simple counter data which have two fields separated by comma, first field is a date(yyyy-MM-dd_HH:MM:SS) and second field is a counter (1 - 10000):
+In this we take a simple counter data which have two fields separated by comma, first field is a date `yyyy-MM-dd_HH:MM:SS` and second field is a counter `1 - 10000`:
 [source,text]
 ----
 1970-01-01_01:00:50,1
@@ -398,8 +428,16 @@ Third parameter in dateFormat() can be a representation of a custom format used 
 ----
 xd:>stream create --name test9 --definition "reactor-ip | hdfs --idleTimeout=30000 --fileUuid=true --partitionPath=path(dateFormat('yyyy/MM/dd',payload.split(',')[0],'yyyy-MM-DD_HH:MM:SS'))"
 xd:>stream deploy --name test9 --properties "module.hdfs.count=3,module.reactor-ip.count=1"
-# cat date-counters-custom-10000.txt | nc node2 3000
 ----
+
+Send sample data to `reactor-ip` source.
+
+[source,text]
+----
+# cat date-counters-custom-10000.txt | nc localhost 3000
+----
+
+List files and see how data is partitioned.
 
 [source,text]
 ----
